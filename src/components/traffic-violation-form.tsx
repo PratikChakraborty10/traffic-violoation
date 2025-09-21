@@ -72,7 +72,7 @@ export function TrafficViolationForm() {
         try {
           // Using OpenStreetMap Nominatim for reverse geocoding
           const response = await fetch(
-            `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&addressdetails=1&zoom=18&namedetails=1`
+            `/api/geocode?latitude=${latitude}&longitude=${longitude}`
           );
           
           if (!response.ok) {

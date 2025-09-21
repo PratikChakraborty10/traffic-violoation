@@ -10,11 +10,11 @@ export async function GET(request: Request) {
   }
 
   try {
-    const nominatimUrl = `${process.env.NOMINATIM_URL}?format=json&lat=${latitude}&lon=${longitude}&addressdetails=1&zoom=18&namedetails=1`;
+    const nominatimUrl = `${process.env.OPENSTREET_REVERSE_GROCODING_API_BASEURL}?format=json&lat=${latitude}&lon=${longitude}&addressdetails=1&zoom=18&namedetails=1`;
 
     const response = await fetch(nominatimUrl, {
       headers: {
-        "User-Agent": "TrafficViolationForm/1.0 (https://traffic-violoation.vercel.app/app)"
+        "User-Agent": "TrafficViolationForm/1.0 (https://traffic-violation.vercel.app)"
       },
     });
 
@@ -26,6 +26,6 @@ export async function GET(request: Request) {
     return NextResponse.json(data);
   } catch (error) {
     console.error("Proxy geocoding error:", error);
-    return NextResponse.json({ error: "Failed to fetch location data" }, { status: 500 });
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Failed to fetch location data" }, { status: 500 });
   }
 }

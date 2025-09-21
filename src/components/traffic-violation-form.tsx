@@ -39,6 +39,8 @@ export function TrafficViolationForm() {
   const [isRecording, setIsRecording] = useState(false);
   const [submitError, setSubmitError] = useState("");
   const [isCameraReady, setIsCameraReady] = useState(false);
+  const [submitProgress, setSubmitProgress] = useState("");
+  const [currentStep, setCurrentStep] = useState(0);
   const videoRef = useRef<HTMLVideoElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -233,6 +235,12 @@ export function TrafficViolationForm() {
               type: "image/jpeg",
             });
             
+            // Check file size before adding to form
+            if (!validateFileSize(file)) {
+              setSubmitError("Photo is too large (max 10MB). Please try capturing a smaller image.");
+              return;
+            }
+            
             // Clear existing media and add only this photo
             setFormData((prev) => ({
               ...prev,
@@ -296,6 +304,13 @@ export function TrafficViolationForm() {
         const file = new File([blob], `video-${Date.now()}.webm`, {
           type: "video/webm",
         });
+        
+        // Check file size before adding to form
+        if (!validateFileSize(file)) {
+          setSubmitError("Video is too large (max 10MB). Please try recording a shorter video.");
+          stopCamera();
+          return;
+        }
         
         // Clear existing media and add only this video
         setFormData((prev) => ({ 
@@ -367,18 +382,11 @@ export function TrafficViolationForm() {
     e.preventDefault();
     setIsSubmitting(true);
     setSubmitError("");
+    setSubmitProgress("");
+    setCurrentStep(0);
 
     try {
-      // Generate unique incident ID from API
-      const incidentIdResult = await generateIncidentId();
-      if (!incidentIdResult.success || !incidentIdResult.incidentId) {
-        setSubmitError(incidentIdResult.error || "Failed to generate incident ID");
-        return;
-      }
-
-      const newIncidentId = incidentIdResult.incidentId;
-      
-      // Upload media files first - MANDATORY (exactly one)
+      // Validate media files first
       if (formData.media.length === 0) {
         setSubmitError("Please capture one photo or video as evidence");
         return;
@@ -389,6 +397,29 @@ export function TrafficViolationForm() {
         return;
       }
 
+      // Check file size before proceeding
+      const mediaFile = formData.media[0];
+      if (!validateFileSize(mediaFile)) {
+        setSubmitError("File size must not exceed 10MB. Please capture a smaller photo or video.");
+        return;
+      }
+
+      // Step 1: Generate incident ID
+      setCurrentStep(1);
+      setSubmitProgress("Generating unique incident ID...");
+      const incidentIdResult = await generateIncidentId();
+      if (!incidentIdResult.success || !incidentIdResult.incidentId) {
+        setSubmitError(incidentIdResult.error || "Failed to generate incident ID");
+        return;
+      }
+
+      const newIncidentId = incidentIdResult.incidentId;
+      setCurrentStep(2);
+      setSubmitProgress("Incident ID generated successfully");
+
+      // Step 2: Upload media files
+      setCurrentStep(3);
+      setSubmitProgress("Uploading media file to cloud storage...");
       console.log("Starting media upload for", formData.media.length, "files");
       const uploadResult = await uploadMultipleFiles(formData.media, newIncidentId);
       
@@ -405,8 +436,12 @@ export function TrafficViolationForm() {
 
       console.log("Successfully uploaded media URLs:", uploadResult.urls);
       const mediaUrls = uploadResult.urls;
+      setCurrentStep(4);
+      setSubmitProgress("Media file uploaded successfully");
 
-      // Submit form data to database
+      // Step 3: Submit form data to database
+      setCurrentStep(5);
+      setSubmitProgress("Submitting report to database...");
       const submissionData = {
         incident_id: newIncidentId,
         description: formData.description,
@@ -420,6 +455,8 @@ export function TrafficViolationForm() {
       const result = await submitTrafficViolation(submissionData);
       
       if (result.success) {
+        setCurrentStep(6);
+        setSubmitProgress("Report submitted successfully!");
         setIncidentId(newIncidentId);
         setIsSubmitted(true);
         // Stop camera and release permissions after successful submission
@@ -434,6 +471,12 @@ export function TrafficViolationForm() {
     }
   };
 
+  // File size validation function
+  const validateFileSize = (file: File): boolean => {
+    const maxSize = 10 * 1024 * 1024; // 10MB in bytes
+    return file.size <= maxSize;
+  };
+
   const resetForm = () => {
     setFormData({
       location: { city: "", state: "", latitude: "", longitude: "" },
@@ -443,6 +486,8 @@ export function TrafficViolationForm() {
     setIsSubmitted(false);
     setIncidentId("");
     setSubmitError("");
+    setSubmitProgress("");
+    setCurrentStep(0);
     // Ensure camera is stopped and permissions are released
     stopCamera();
   };
@@ -739,6 +784,9 @@ export function TrafficViolationForm() {
                       <span className="text-xs text-slate-500">
                         {(formData.media[0].size / (1024 * 1024)).toFixed(1)}MB • 
                         {formData.media[0].type.startsWith("image/") ? " Photo" : " Video"}
+                        {!validateFileSize(formData.media[0]) && (
+                          <span className="text-red-600 font-medium"> (Too large - max 10MB)</span>
+                        )}
                       </span>
                     </div>
                   </div>
@@ -763,6 +811,88 @@ export function TrafficViolationForm() {
                 {submitError}
               </AlertDescription>
             </Alert>
+          )}
+
+          {/* Progress Stepper */}
+          {isSubmitting && (
+            <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-lg p-6">
+              <div className="space-y-4">
+                <div className="flex items-center justify-center mb-4">
+                  <Loader2 className="w-6 h-6 animate-spin text-blue-600 mr-2" />
+                  <h3 className="text-lg font-semibold text-blue-800">Submitting Report</h3>
+                </div>
+                
+                {/* Stepper */}
+                <div className="space-y-3">
+                  {[
+                    { step: 1, title: "Generating Incident ID", description: "Creating unique identifier" },
+                    { step: 2, title: "Incident ID Ready", description: "ID generated successfully" },
+                    { step: 3, title: "Uploading Media", description: "Saving photo/video to cloud" },
+                    { step: 4, title: "Media Uploaded", description: "File saved successfully" },
+                    { step: 5, title: "Submitting Report", description: "Saving to database" },
+                    { step: 6, title: "Complete", description: "Report submitted successfully" }
+                  ].map((item, index) => {
+                    const isCompleted = currentStep > item.step;
+                    const isCurrent = currentStep === item.step;
+                    
+                    return (
+                      <div key={item.step} className="flex items-center space-x-3">
+                        {/* Step Circle */}
+                        {(() => {
+                          let circleClass = 'flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ';
+                          let circleContent;
+                          
+                          if (isCompleted) {
+                            circleClass += 'bg-green-500 text-white';
+                            circleContent = <CheckCircle className="w-5 h-5" />;
+                          } else if (isCurrent) {
+                            circleClass += 'bg-blue-500 text-white';
+                            circleContent = <Loader2 className="w-4 h-4 animate-spin" />;
+                          } else {
+                            circleClass += 'bg-gray-200 text-gray-500';
+                            circleContent = item.step;
+                          }
+                          
+                          return (
+                            <div className={circleClass}>
+                              {circleContent}
+                            </div>
+                          );
+                        })()}
+                        
+                        {/* Step Content */}
+                        <div className="flex-1 min-w-0">
+                          <p className={`text-sm font-medium ${
+                            isCompleted || isCurrent ? 'text-gray-900' : 'text-gray-500'
+                          }`}>
+                            {item.title}
+                          </p>
+                          <p className={`text-xs ${
+                            isCompleted || isCurrent ? 'text-gray-600' : 'text-gray-400'
+                          }`}>
+                            {item.description}
+                          </p>
+                        </div>
+                        
+                        {/* Progress Line */}
+                        {index < 5 && (
+                          <div className={`w-px h-8 ml-4 ${
+                            isCompleted ? 'bg-green-500' : 'bg-gray-200'
+                          }`} />
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+                
+                {/* Current Status */}
+                {submitProgress && (
+                  <div className="mt-4 p-3 bg-white rounded-lg border border-blue-100">
+                    <p className="text-sm text-blue-700 font-medium">{submitProgress}</p>
+                  </div>
+                )}
+              </div>
+            </div>
           )}
 
           {/* Submit Button */}

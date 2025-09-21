@@ -14,7 +14,7 @@ export async function GET(request: Request) {
 
     const response = await fetch(nominatimUrl, {
       headers: {
-        "User-Agent": "TrafficViolationForm/1.0 (https://your-app-domain.com)"
+        "User-Agent": "TrafficViolationForm/1.0 (https://traffic-violoation.vercel.app/app)"
       },
     });
 

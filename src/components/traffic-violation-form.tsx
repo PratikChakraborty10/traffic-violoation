@@ -38,6 +38,7 @@ export function TrafficViolationForm() {
   const [locationError, setLocationError] = useState("");
   const [isRecording, setIsRecording] = useState(false);
   const [submitError, setSubmitError] = useState("");
+  const [isCameraReady, setIsCameraReady] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -111,34 +112,73 @@ export function TrafficViolationForm() {
 
   const startCamera = async () => {
     try {
+      // Stop any existing camera first
+      stopCamera();
+      
+      console.log("Starting camera...");
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: "environment" }, // Use back camera on mobile
         audio: false,
       });
+      
       streamRef.current = stream;
+      
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
+        
+        // Wait for video to be ready
+        videoRef.current.onloadedmetadata = () => {
+          console.log("Camera stream loaded, video ready");
+          setIsCameraReady(true);
+        };
+        
+        videoRef.current.onerror = (error) => {
+          console.error("Video element error:", error);
+          setIsCameraReady(false);
+        };
       }
     } catch (error) {
       console.error("Error accessing camera:", error);
+      setIsCameraReady(false);
     }
   };
 
   const capturePhoto = async () => {
-    if (videoRef.current && streamRef.current) {
-      const canvas = document.createElement("canvas");
-      const context = canvas.getContext("2d");
+    console.log("Attempting to capture photo...", {
+      hasVideoRef: !!videoRef.current,
+      hasStream: !!streamRef.current,
+      isCameraReady,
+      videoWidth: videoRef.current?.videoWidth,
+      videoHeight: videoRef.current?.videoHeight
+    });
 
-      if (!context) {
-        console.error("Could not get canvas context");
-        return;
-      }
+    if (!videoRef.current || !streamRef.current || !isCameraReady) {
+      console.error("Camera not ready for photo capture");
+      setSubmitError("Camera is not ready. Please wait for camera to load or try again.");
+      return;
+    }
 
-      canvas.width = videoRef.current.videoWidth;
-      canvas.height = videoRef.current.videoHeight;
+    if (videoRef.current.videoWidth === 0 || videoRef.current.videoHeight === 0) {
+      console.error("Video dimensions not available");
+      setSubmitError("Camera video not ready. Please wait a moment and try again.");
+      return;
+    }
 
-      console.log("Capturing photo with dimensions:", canvas.width, "x", canvas.height);
+    const canvas = document.createElement("canvas");
+    const context = canvas.getContext("2d");
 
+    if (!context) {
+      console.error("Could not get canvas context");
+      setSubmitError("Failed to capture photo. Please try again.");
+      return;
+    }
+
+    canvas.width = videoRef.current.videoWidth;
+    canvas.height = videoRef.current.videoHeight;
+
+    console.log("Capturing photo with dimensions:", canvas.width, "x", canvas.height);
+
+    try {
       context.drawImage(videoRef.current, 0, 0);
       
       canvas.toBlob(
@@ -156,8 +196,10 @@ export function TrafficViolationForm() {
             }));
             
             console.log("Photo added to form data");
+            setSubmitError(""); // Clear any previous errors
           } else {
             console.error("Failed to create blob from canvas");
+            setSubmitError("Failed to process photo. Please try again.");
           }
         },
         "image/jpeg",
@@ -166,21 +208,33 @@ export function TrafficViolationForm() {
 
       // Stop camera after capture
       stopCamera();
-    } else {
-      console.error("Video ref or stream not available for photo capture");
+    } catch (error) {
+      console.error("Error during photo capture:", error);
+      setSubmitError("Failed to capture photo. Please try again.");
     }
   };
 
   const startVideoRecording = async () => {
     try {
+      // Stop any existing camera first
+      stopCamera();
+      
+      console.log("Starting video recording...");
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: "environment" },
         audio: true,
       });
+      
       streamRef.current = stream;
 
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
+        
+        // Wait for video to be ready
+        videoRef.current.onloadedmetadata = () => {
+          console.log("Video stream loaded, starting recording");
+          setIsCameraReady(true);
+        };
       }
 
       const mediaRecorder = new MediaRecorder(stream);
@@ -209,10 +263,17 @@ export function TrafficViolationForm() {
         stopCamera();
       };
 
-      mediaRecorder.start();
-      setIsRecording(true);
+      // Start recording after a short delay to ensure video is ready
+      setTimeout(() => {
+        if (mediaRecorder.state === 'inactive') {
+          mediaRecorder.start();
+          setIsRecording(true);
+        }
+      }, 500);
+
     } catch (error) {
       console.error("Error starting video recording:", error);
+      setIsCameraReady(false);
     }
   };
 
@@ -224,6 +285,8 @@ export function TrafficViolationForm() {
   };
 
   const stopCamera = () => {
+    console.log("Stopping camera...");
+    
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((track) => {
         track.stop();
@@ -232,12 +295,20 @@ export function TrafficViolationForm() {
       });
       streamRef.current = null;
     }
+    
     if (videoRef.current) {
       videoRef.current.srcObject = null;
+      // Clear event listeners
+      videoRef.current.onloadedmetadata = null;
+      videoRef.current.onerror = null;
     }
-    // Reset recording state
+    
+    // Reset all camera states
     setIsRecording(false);
+    setIsCameraReady(false);
     mediaRecorderRef.current = null;
+    
+    console.log("Camera stopped and cleaned up");
   };
 
   const removeMedia = (index: number) => {
@@ -571,20 +642,29 @@ export function TrafficViolationForm() {
                 className="w-full max-w-md mx-auto rounded-lg bg-slate-100 hidden"
                 style={{ display: streamRef.current ? "block" : "none" }}
               />
-              {streamRef.current && !isRecording && (
-                <div className="flex justify-center gap-3 mt-3">
-                  <Button
-                    type="button"
-                    onClick={capturePhoto}
-                    className="bg-emerald-600 hover:bg-emerald-700"
-                  >
-                    Capture Photo
-                  </Button>
-                  <Button type="button" variant="outline" onClick={stopCamera}>
-                    Cancel
-                  </Button>
-                </div>
-              )}
+               {streamRef.current && !isRecording && (
+                 <div className="flex justify-center gap-3 mt-3">
+                   <Button
+                     type="button"
+                     onClick={capturePhoto}
+                     disabled={!isCameraReady}
+                     className={`${isCameraReady ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-gray-400 cursor-not-allowed'}`}
+                   >
+                     {isCameraReady ? 'Capture Photo' : 'Camera Loading...'}
+                   </Button>
+                   <Button type="button" variant="outline" onClick={stopCamera}>
+                     Cancel
+                   </Button>
+                 </div>
+               )}
+               
+               {streamRef.current && !isCameraReady && (
+                 <div className="text-center mt-2">
+                   <p className="text-sm text-amber-600">
+                     Camera is loading... Please wait
+                   </p>
+                 </div>
+               )}
             </div>
 
             {/* Media Preview */}

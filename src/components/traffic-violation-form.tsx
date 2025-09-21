@@ -43,8 +43,11 @@ export function TrafficViolationForm() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
-  // Cleanup camera on component unmount
+  // Auto-request location on component mount
   useEffect(() => {
+    // Auto-request location when component mounts
+    getCurrentLocation();
+    
     return () => {
       stopCamera();
     };
@@ -65,19 +68,40 @@ export function TrafficViolationForm() {
         const { latitude, longitude } = position.coords;
 
         try {
-          // Using a reverse geocoding service (OpenStreetMap Nominatim)
+          // Using OpenStreetMap Nominatim for reverse geocoding
           const response = await fetch(
-            `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&addressdetails=1`
+            `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&addressdetails=1&zoom=18&namedetails=1`
           );
+          
+          if (!response.ok) {
+            throw new Error(`Geocoding API error: ${response.status}`);
+          }
+          
           const data = await response.json();
+          console.log("OpenStreetMap geocoding result:", data);
 
+          // Extract city with better fallbacks
           const city =
             data.address?.city ||
             data.address?.town ||
             data.address?.village ||
-            "Unknown";
+            data.address?.municipality ||
+            data.address?.hamlet ||
+            data.address?.suburb ||
+            data.address?.county ||
+            data.address?.city_district ||
+            "Location detected";
+
+          // Extract state with better fallbacks
           const state =
-            data.address?.state || data.address?.province || "Unknown";
+            data.address?.state ||
+            data.address?.province ||
+            data.address?.region ||
+            data.address?.county ||
+            data.address?.state_district ||
+            "GPS coordinates available";
+
+          console.log("Extracted location:", { city, state });
 
           setFormData((prev) => ({
             ...prev,
@@ -88,12 +112,14 @@ export function TrafficViolationForm() {
               longitude: longitude.toFixed(6),
             },
           }));
-        } catch (_error) {
-          // Fallback to just coordinates if geocoding fails
+        } catch (error) {
+          console.error("Geocoding error:", error);
+          // Fallback to coordinates with better labels
           setFormData((prev) => ({
             ...prev,
             location: {
-              ...prev.location,
+              city: "Location detected",
+              state: "GPS coordinates available",
               latitude: latitude.toFixed(6),
               longitude: longitude.toFixed(6),
             },
@@ -102,8 +128,26 @@ export function TrafficViolationForm() {
 
         setIsGettingLocation(false);
       },
-      () => {
-        setLocationError("Unable to retrieve your location. Please try again.");
+      (error) => {
+        console.error("Geolocation error:", error);
+        let errorMessage = "Unable to retrieve your location. ";
+        
+        switch (error.code) {
+          case error.PERMISSION_DENIED:
+            errorMessage += "Location access denied. Please enable location permission in your browser settings and refresh the page.";
+            break;
+          case error.POSITION_UNAVAILABLE:
+            errorMessage += "Location information unavailable. Please try again.";
+            break;
+          case error.TIMEOUT:
+            errorMessage += "Location request timed out. Please try again.";
+            break;
+          default:
+            errorMessage += "Please try again.";
+            break;
+        }
+        
+        setLocationError(errorMessage);
         setIsGettingLocation(false);
       },
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
@@ -477,9 +521,17 @@ export function TrafficViolationForm() {
                 )}
                 {isGettingLocation
                   ? "Getting Location..."
-                  : "Get Current Location"}
+                  : "Refresh Location"}
               </Button>
             </div>
+            
+            {isGettingLocation && (
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                <p className="text-sm text-blue-800">
+                  <strong>Auto-detecting location...</strong> Please allow location access when prompted by your browser.
+                </p>
+              </div>
+            )}
 
             {locationError && (
               <Alert className="border-amber-200 bg-amber-50">
